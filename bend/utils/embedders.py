@@ -994,7 +994,7 @@ class DNABert2Embedder(BaseEmbedder):
         Byte-pair encoding merges a variable number of letters into one token.
         We need to repeat each token's embedding vector for each letter in the token.
         '''
-        assert len(tokens) == embeddings.shape[1], 'Number of tokens and embeddings must match.'
+        assert len(tokens) == embeddings.shape[0], 'Number of tokens and embeddings must match.'
         new_embeddings = []
         for idx, token in enumerate(tokens):
 

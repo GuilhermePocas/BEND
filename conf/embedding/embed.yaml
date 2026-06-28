@@ -9,30 +9,9 @@ hydra :
     - file://conf 
   sweeper:
     params:
-      model: gena-lm-bigbird-base-t2t,
-             gena-lm-bert-large-t2,
-             hyenadna-tiny-1k,
-             hyenadna-large-1m,
-             dnabert6,
-             resnetlm,
-             nt_transformer_ms,
-             nt_transformer_human_ref,
-             nt_transformer_1000g,
-             dnabert2,
-             onehot, 
-             awdlstm,
-             nt_transformer_v2_500m,
-             grover
-             #hyenadna-small-32k,
-             #hyenadna-medium-160k,
-             #hyenadna-medium-450k,
+      model: caduceus
       task: 
-            gene_finding,
-            enhancer_annotation,
-            variant_effects,
-            histone_modification,
-            chromatin_accessibility
-            cpg_methylation
+            gene_finding
 
 chunk_size : 50000
 chunk : null # can be given as a list of chunks to embed 
@@ -42,6 +21,9 @@ splits : null
 model : nt_transformer_1000g
 task : gene_finding
 # model instatiators 
+caduceus:
+  _target_ : bend.utils.embedders.CaduceusEmbedder
+  model_name : kuleshov-group/caduceus-ph_seqlen-131k_d_model-256_n_layer-16
 dnabert2:
   _target_ : bend.utils.embedders.DNABert2Embedder
   model_name : zhihan1996/DNABERT-2-117M
@@ -135,4 +117,3 @@ cpg_methylation:
   read_strand : true
   hdf5_file : null
   label_depth : ${datadims.cpg_methylation}
-
