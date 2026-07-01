@@ -16,10 +16,10 @@ def main():
     parser.add_argument('bed_file', type=str, help='Path to the bed file')
     parser.add_argument('out_file', type=str, help='Path to the output file')
     # model can be any of the ones supported by bend.utils.embedders
-    parser.add_argument('model', choices=['nt', 'dnabert', 'awdlstm', 'gpn', 'convnet', 'genalm', 'hyenadna', 'dnabert2','grover'], type=str, help='Model architecture for computing embeddings')
+    parser.add_argument('model', choices=['ag', 'nt', 'dnabert', 'awdlstm', 'gpn', 'convnet', 'genalm', 'hyenadna', 'dnabert2','grover'], type=str, help='Model architecture for computing embeddings')
     parser.add_argument('checkpoint', type=str, help='Path to or name of the model checkpoint')
     parser.add_argument('genome', type=str, help='Path to the reference genome fasta file')
-    parser.add_argument('--extra_context', type=int, default=256, help='Number of extra nucleotides to include on each side of the sequence')
+    parser.add_argument('--extra_context', type=int, default=1024, help='Number of extra nucleotides to include on each side of the sequence')
     parser.add_argument('--kmer', type=int, default=3, help = 'Kmer size for the DNABERT model')
     parser.add_argument('--embedding_idx', type=int, default=0, help = 'Index of the embedding to use for computing the distance')
 
@@ -28,9 +28,11 @@ def main():
     extra_context_left = args.extra_context
     extra_context_right = args.extra_context
 
-    kwargs = {'disable_tqdm': True}
+    kwargs = {'disable_tqdm': False}
     # get the embedder
-    if args.model == 'nt':
+    if args.model == 'ag':
+         embedder = embedders.AlphaGenomeEmbedder(args.checkpoint)
+    elif args.model == 'nt':
          embedder = embedders.NucleotideTransformerEmbedder(args.checkpoint)
          kwargs['upsample_embeddings'] = True # each nucleotide has an embedding
     elif args.model == 'dnabert':

@@ -9,7 +9,7 @@ hydra :
     - file://conf 
   sweeper:
     params:
-      model: caduceus
+      model: alphagenome
       task: 
             gene_finding
 
@@ -20,7 +20,10 @@ embedders_dir : ./pretrained_models/
 splits : null
 model : nt_transformer_1000g
 task : gene_finding
-# model instatiators 
+# model instatiators
+alphagenome:
+  _target_ : bend.utils.embedders.AlphaGenomeEmbedder
+  model_name : ${embedders_dir}/alphagenome/model_all_folds.safetensors
 caduceus:
   _target_ : bend.utils.embedders.CaduceusEmbedder
   model_name : kuleshov-group/caduceus-ph_seqlen-131k_d_model-256_n_layer-16

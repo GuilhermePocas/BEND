@@ -21,6 +21,7 @@ import numpy as np
 from typing import List, Iterable
 from functools import partial
 import os
+import math
 
 from bend.models.awd_lstm import AWDLSTMModelForInference
 from bend.models.dilated_cnn import ConvNetModel
@@ -29,10 +30,12 @@ from bend.models.hyena_dna import HyenaDNAPreTrainedModel, CharacterTokenizer
 from bend.models.dnabert2 import BertModel as DNABert2BertModel
 from bend.models.dnabert2 import BertForMaskedLM as DNABert2BertForMaskedLM
 from bend.utils.download import download_model, download_model_zenodo
+from transformers import AutoModel
 
 from tqdm.auto import tqdm
 from transformers import logging, BertModel, BertConfig, BertTokenizer, AutoModel, AutoTokenizer, BigBirdModel, AutoModelForMaskedLM
 from sklearn.preprocessing import LabelEncoder
+from alphagenome_pytorch import AlphaGenome
 logging.set_verbosity_error()
 
 
@@ -1420,3 +1423,82 @@ def embed_sequence(sequences : List[str], embedding_type : str = 'categorical', 
         return sequences
 
     return sequences
+
+class AlphaGenomeEmbedder(BaseEmbedder):
+    
+    def load_model(self, model_path = 'pretrained_models/alphagenome/model_all_folds.safetensors', return_logits: bool=False, return_loss: bool=False, **kwargs):
+        """
+        Load the HyenaDNA model.
+
+        Parameters
+        ----------
+        model_path : str, optional
+            Path to the model checkpoint. Defaults to 'pretrained_models/hyenadna/hyenadna-tiny-1k-seqlen'.
+            If the path does not exist, the model will be downloaded from HuggingFace. Rather than just downloading the model,
+            HyenaDNA's `from_pretrained` method relies on cloning the HuggingFace-hosted repository, and using git lfs to download the model.
+            This requires git lfs to be installed on your system, and will fail if it is not.
+        return_logits : bool, optional
+            If True, returns logits instead of embeddings. Defaults to False.
+        return_loss : bool, optional
+            If True, returns the unreduced next token prediction loss. Incompatible with return_logits. We trim special tokens from the
+            output so that the loss is only computed on the ACTGN vocabulary.
+              Defaults to False.
+
+        
+        """
+        if return_logits and return_loss:
+            raise ValueError('Only one of return_logits and return_loss can be True')
+        
+        self.return_logits = return_logits
+        self.return_loss = return_loss
+
+        # all these settings are copied directly from huggingface.py
+
+        model = AlphaGenome.from_pretrained(model_path, device='cuda')
+        model.eval()
+
+        model.to(device)
+        self.model = model
+
+    def embed(self, sequences: List[str], disable_tqdm: bool = False, remove_special_tokens: bool = False, upsample_embeddings: bool = False):
+        '''Embeds a list of sequences using the HyenaDNA model.
+        Parameters
+        ----------
+        sequences : List[str]
+            List of sequences to embed.
+        disable_tqdm : bool, optional
+            Whether to disable the tqdm progress bar. Defaults to False.
+        remove_special_tokens : bool, optional
+            Whether to remove the CLS and SEP tokens from the embeddings. Defaults to True. Cannot be set to False if
+            the return_loss option of the embedder is True (autoregression forces us to discard the BOS token position either way).
+        upsample_embeddings : bool, optional
+            Whether to upsample the embeddings to match the length of the input sequences. Defaults to False.
+            Only provided for compatibility with other embedders. HyenaDNA embeddings are already the same length as the input sequence.
+        Returns
+        -------
+
+        embeddings : List[np.ndarray]
+            List of embeddings.
+        '''
+
+        embeddings = []
+        with torch.inference_mode():
+            for s in tqdm(sequences, disable=disable_tqdm):
+
+                if not math.log(len(s),2).is_integer():
+                    lower_power = 2**math.trunc(math.log(len(s),2))
+                    s = s[:lower_power]
+
+                encoder = EncodeSequence(nucleotide_categories= ['A', 'C', 'G', 'T'])
+                dna_onehot = encoder.transform_integer(sequence=s, return_onehot=True)
+                dna_onehot = torch.tensor(dna_onehot).unsqueeze(0).cuda()
+
+                emb = self.model.encode(dna_onehot, organism_index=0, resolutions=(1,))
+
+                embeddings.append(emb['embeddings_1bp'].cpu().numpy())
+                
+                
+
+        return embeddings
+    
+
