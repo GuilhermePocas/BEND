@@ -1485,9 +1485,9 @@ class AlphaGenomeEmbedder(BaseEmbedder):
         with torch.inference_mode():
             for s in tqdm(sequences, disable=disable_tqdm):
 
-                if not math.log(len(s),2).is_integer():
-                    lower_power = 2**math.trunc(math.log(len(s),2))
-                    s = s[:lower_power]
+                #if not math.log(len(s),2).is_integer():
+                #    lower_power = 2**math.trunc(math.log(len(s),2))
+                #    s = s[:lower_power]
 
                 encoder = EncodeSequence(nucleotide_categories= ['A', 'C', 'G', 'T'])
                 dna_onehot = encoder.transform_integer(sequence=s, return_onehot=True)

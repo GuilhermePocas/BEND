@@ -28,7 +28,7 @@ def main():
     extra_context_left = args.extra_context
     extra_context_right = args.extra_context
 
-    kwargs = {'disable_tqdm': False}
+    kwargs = {'disable_tqdm': True}
     # get the embedder
     if args.model == 'ag':
          embedder = embedders.AlphaGenomeEmbedder(args.checkpoint)
@@ -74,12 +74,18 @@ def main():
 
     genome_annotation.annotation['distance'] = None
 
+    count = 0
+
     for index, row in tqdm(genome_annotation.annotation.iterrows()):
 
 
         # middle_point = row['start'] + 256
         # index the right embedding with dna[len(dna)//2]
         dna = genome_annotation.get_dna_segment(index = index)
+
+        dna = dna.replace('N', 'A')
+        count += dna.count('N')
+
         dna_alt = [x for x in dna]
         if extra_context_left == extra_context_right:
             dna_alt[len(dna_alt)//2] = row['alt']
@@ -97,6 +103,7 @@ def main():
 
 
     genome_annotation.annotation.to_csv(args.out_file)
+    print(f"total Ns: {count}")
 
 
 
