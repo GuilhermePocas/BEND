@@ -8,6 +8,9 @@ import argparse
 from bend.utils import embedders, Annotation
 from tqdm.auto import tqdm
 from scipy import spatial
+import time
+import torch
+from torch.utils.flop_counter import FlopCounterMode
 
 
 def main():
@@ -75,35 +78,55 @@ def main():
     genome_annotation.annotation['distance'] = None
 
     count = 0
+    Ncount = 0
+    start = time.perf_counter()
+    torch.cuda.reset_peak_memory_stats()
+    
+    flop_counter = FlopCounterMode(display=False)
 
-    for index, row in tqdm(genome_annotation.annotation.iterrows()):
+    with flop_counter:
+        for index, row in tqdm(genome_annotation.annotation.iterrows()):
 
 
-        # middle_point = row['start'] + 256
-        # index the right embedding with dna[len(dna)//2]
-        dna = genome_annotation.get_dna_segment(index = index)
+            # middle_point = row['start'] + 256
+            # index the right embedding with dna[len(dna)//2]
+            dna = genome_annotation.get_dna_segment(index = index)
 
-        dna = dna.replace('N', 'A')
-        count += dna.count('N')
+            #dna = dna.replace('N', 'A')
+            #Ncount += dna.count('N')
 
-        dna_alt = [x for x in dna]
-        if extra_context_left == extra_context_right:
-            dna_alt[len(dna_alt)//2] = row['alt']
-        elif extra_context_right == 0:
-            dna_alt[-1] = row['alt']
-        elif extra_context_left == 0:
-            dna_alt[0] = row['alt']
-        else:
-            raise ValueError('Not implemented')
-        dna_alt = ''.join(dna_alt)
+            dna_alt = [x for x in dna]
+            if extra_context_left == extra_context_right:
+                dna_alt[len(dna_alt)//2] = row['alt']
+            elif extra_context_right == 0:
+                dna_alt[-1] = row['alt']
+            elif extra_context_left == 0:
+                dna_alt[0] = row['alt']
+            else:
+                raise ValueError('Not implemented')
+            dna_alt = ''.join(dna_alt)
 
-        embedding_wt, embedding_alt = embedder.embed([dna, dna_alt], **kwargs)
-        d = spatial.distance.cosine(embedding_alt[0, args.embedding_idx], embedding_wt[0, args.embedding_idx])
-        genome_annotation.annotation.loc[index, 'distance'] = d
+            embedding_wt, embedding_alt = embedder.embed([dna, dna_alt], **kwargs)
+            d = spatial.distance.cosine(embedding_alt[0, args.embedding_idx], embedding_wt[0, args.embedding_idx])
+            genome_annotation.annotation.loc[index, 'distance'] = d
+            
+            count += 1
+            if count == 100:
+                break
 
 
     genome_annotation.annotation.to_csv(args.out_file)
-    print(f"total Ns: {count}")
+    print(f"total Ns: {Ncount}")
+
+    elapsed = time.perf_counter() - start
+    print(f"Total elapsed time: {elapsed}")
+
+    peak_mem_gb = torch.cuda.max_memory_allocated() / 1e9
+    print(f"Peak GPU memory: {peak_mem_gb:.2f} GB")
+
+    total_flops = flop_counter.get_total_flops()
+    print(f"Total FLOPs: {total_flops:.3e}")
+    print(f"FLOPs/sample (÷{count} seqs): {total_flops / count:.3e}")
 
 
 

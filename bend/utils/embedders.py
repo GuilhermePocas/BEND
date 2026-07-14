@@ -1001,18 +1001,19 @@ class DNABert2Embedder(BaseEmbedder):
         new_embeddings = []
         for idx, token in enumerate(tokens):
 
+            slice_i = embeddings[idx : idx + 1, :]
+
             if has_special_tokens and (idx == 0 or idx == len(tokens) - 1):
-                new_embeddings.append(embeddings[:, [idx]]) # (1, 768)
+                new_embeddings.append(slice_i)
                 continue
-            token_embedding = embeddings[:, [idx]] # (1, 768)
-            if token == '[UNK]':
-                new_embeddings.extend([token_embedding])
+            if token == "[UNK]":
+                new_embeddings.append(slice_i)
             else:
-                new_embeddings.extend([token_embedding] * len(token))
+                new_embeddings.extend([slice_i] * len(token))
 
         # list of (1,1, 768) arrays
-        new_embeddings = np.concatenate(new_embeddings, axis=1)
-        return new_embeddings
+        new_embeddings = np.concatenate(new_embeddings, axis=0)
+        return new_embeddings[None, :, :]
 
 
 class GROVEREmbedder(BaseEmbedder):
