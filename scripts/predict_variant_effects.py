@@ -10,7 +10,8 @@ from tqdm.auto import tqdm
 from scipy import spatial
 import time
 import torch
-from torch.utils.flop_counter import FlopCounterMode
+import torchvision.models as models
+from torch.profiler import profile, ProfilerActivity, record_function
 
 
 def main():
@@ -80,39 +81,38 @@ def main():
     count = 0
     Ncount = 0
     start = time.perf_counter()
-    torch.cuda.reset_peak_memory_stats()
-    
-    flop_counter = FlopCounterMode(display=False)
-
-    with flop_counter:
-        for index, row in tqdm(genome_annotation.annotation.iterrows()):
 
 
-            # middle_point = row['start'] + 256
-            # index the right embedding with dna[len(dna)//2]
-            dna = genome_annotation.get_dna_segment(index = index)
+    with profile(activities=[ProfilerActivity.CUDA], profile_memory=True) as prof:
+        with record_function("model_inference"):
+            for index, row in tqdm(genome_annotation.annotation.iterrows()):
 
-            #dna = dna.replace('N', 'A')
-            #Ncount += dna.count('N')
 
-            dna_alt = [x for x in dna]
-            if extra_context_left == extra_context_right:
-                dna_alt[len(dna_alt)//2] = row['alt']
-            elif extra_context_right == 0:
-                dna_alt[-1] = row['alt']
-            elif extra_context_left == 0:
-                dna_alt[0] = row['alt']
-            else:
-                raise ValueError('Not implemented')
-            dna_alt = ''.join(dna_alt)
+                # middle_point = row['start'] + 256
+                # index the right embedding with dna[len(dna)//2]
+                dna = genome_annotation.get_dna_segment(index = index)
 
-            embedding_wt, embedding_alt = embedder.embed([dna, dna_alt], **kwargs)
-            d = spatial.distance.cosine(embedding_alt[0, args.embedding_idx], embedding_wt[0, args.embedding_idx])
-            genome_annotation.annotation.loc[index, 'distance'] = d
-            
-            count += 1
-            if count == 100:
-                break
+                #dna = dna.replace('N', 'A')
+                #Ncount += dna.count('N')
+
+                dna_alt = [x for x in dna]
+                if extra_context_left == extra_context_right:
+                    dna_alt[len(dna_alt)//2] = row['alt']
+                elif extra_context_right == 0:
+                    dna_alt[-1] = row['alt']
+                elif extra_context_left == 0:
+                    dna_alt[0] = row['alt']
+                else:
+                    raise ValueError('Not implemented')
+                dna_alt = ''.join(dna_alt)
+
+                embedding_wt, embedding_alt = embedder.embed([dna, dna_alt], **kwargs)
+                d = spatial.distance.cosine(embedding_alt[0, args.embedding_idx], embedding_wt[0, args.embedding_idx])
+                genome_annotation.annotation.loc[index, 'distance'] = d
+                
+                count += 1
+                if count == 100:
+                    break
 
 
     genome_annotation.annotation.to_csv(args.out_file)
@@ -121,13 +121,20 @@ def main():
     elapsed = time.perf_counter() - start
     print(f"Total elapsed time: {elapsed}")
 
-    peak_mem_gb = torch.cuda.max_memory_allocated() / 1e9
-    print(f"Peak GPU memory: {peak_mem_gb:.2f} GB")
+    avg = prof.key_averages()
 
-    total_flops = flop_counter.get_total_flops()
-    print(f"Total FLOPs: {total_flops:.3e}")
-    print(f"FLOPs/sample (÷{count} seqs): {total_flops / count:.3e}")
+    total_self_device = sum(e.self_device_time_total for e in avg) / 1000  # ms
+    total_self_cpu  = sum(e.self_cpu_time_total for e in avg) / 1000   # ms
+    total_calls     = sum(e.count for e in avg)
+    total_self_device_mem = sum(e.self_device_memory_usage for e in avg)  # bytes
+    total_self_cpu_mem  = sum(e.self_cpu_memory_usage for e in avg)   # bytes
 
+    print(f"Total GPU compute time: {total_self_device:.1f} ms")
+    print(f"Total CPU time: {total_self_cpu:.1f} ms")
+    print(f"Total kernel/op calls: {total_calls}")
+    print(f"GPU compute per sample (÷{count}): {total_self_device/count:.2f} ms")
+    print(f"Total GPU memory allocated (self, all ops): {total_self_device_mem / 1e9:.3f} GB")
+    print(f"Total CPU memory allocated (self, all ops): {total_self_cpu_mem / 1e9:.3f} GB")
 
 
 
