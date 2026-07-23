@@ -12,6 +12,7 @@ import time
 import torch
 import torchvision.models as models
 from torch.profiler import profile, ProfilerActivity, record_function
+import numpy as np
 
 
 def main():
@@ -25,7 +26,7 @@ def main():
     parser.add_argument('genome', type=str, help='Path to the reference genome fasta file')
     parser.add_argument('--extra_context', type=int, default=1024, help='Number of extra nucleotides to include on each side of the sequence')
     parser.add_argument('--kmer', type=int, default=3, help = 'Kmer size for the DNABERT model')
-    parser.add_argument('--embedding_idx', type=int, default=0, help = 'Index of the embedding to use for computing the distance')
+    parser.add_argument('--embedding_idx', type=int, default=1024, help = 'Index of the embedding to use for computing the distance')
 
     args = parser.parse_args()
 
@@ -82,8 +83,11 @@ def main():
     Ncount = 0
     start = time.perf_counter()
 
+    real_out_path = f"real_embeddings_{args.out_file}.csv"
+    alt_out_path = f"alt_embeddings_{args.out_file}.csv"
 
-    with profile(activities=[ProfilerActivity.CUDA], profile_memory=True) as prof:
+    with open(real_out_path, "w+") as real_f, open(alt_out_path, "w+") as alt_f, \
+    profile(activities=[ProfilerActivity.CUDA], profile_memory=True) as prof:
         with record_function("model_inference"):
             for index, row in tqdm(genome_annotation.annotation.iterrows()):
 
@@ -107,15 +111,22 @@ def main():
                 dna_alt = ''.join(dna_alt)
 
                 embedding_wt, embedding_alt = embedder.embed([dna, dna_alt], **kwargs)
-                d = spatial.distance.cosine(embedding_alt[0, args.embedding_idx], embedding_wt[0, args.embedding_idx])
+                embedding_wt = embedding_wt[0, args.embedding_idx]
+                embedding_alt = embedding_alt[0, args.embedding_idx]
+
+                np.savetxt(real_f, embedding_wt.reshape(1, -1), delimiter=",")
+                np.savetxt(alt_f, embedding_alt.reshape(1, -1), delimiter=",")
+
+                d = spatial.distance.cosine(embedding_alt, embedding_wt)
                 genome_annotation.annotation.loc[index, 'distance'] = d
                 
-                count += 1
-                if count == 100:
-                    break
+                #count += 1
+                #if count == 1:
+                #    break
 
 
-    genome_annotation.annotation.to_csv(args.out_file)
+    #this is useful for alphagenome
+    genome_annotation.annotation.to_csv(f"cosine_similarities_{args.out_file}.csv")
     print(f"total Ns: {Ncount}")
 
     elapsed = time.perf_counter() - start
