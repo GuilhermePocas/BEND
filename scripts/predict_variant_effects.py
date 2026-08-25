@@ -24,9 +24,9 @@ def main():
     parser.add_argument('model', choices=['ag', 'nt', 'dnabert', 'awdlstm', 'gpn', 'convnet', 'genalm', 'hyenadna', 'dnabert2','grover'], type=str, help='Model architecture for computing embeddings')
     parser.add_argument('checkpoint', type=str, help='Path to or name of the model checkpoint')
     parser.add_argument('genome', type=str, help='Path to the reference genome fasta file')
-    parser.add_argument('--extra_context', type=int, default=1024, help='Number of extra nucleotides to include on each side of the sequence')
+    parser.add_argument('--extra_context', type=int, default=128, help='Number of extra nucleotides to include on each side of the sequence')
     parser.add_argument('--kmer', type=int, default=3, help = 'Kmer size for the DNABERT model')
-    parser.add_argument('--embedding_idx', type=int, default=1024, help = 'Index of the embedding to use for computing the distance')
+    parser.add_argument('--embedding_idx', type=int, default=-1, help = 'Index of the embedding to use for computing the distance')
 
     args = parser.parse_args()
 
@@ -79,50 +79,46 @@ def main():
 
     genome_annotation.annotation['distance'] = None
 
-    count = 0
     Ncount = 0
     start = time.perf_counter()
 
     real_out_path = f"real_embeddings_{args.out_file}.csv"
     alt_out_path = f"alt_embeddings_{args.out_file}.csv"
 
-    with open(real_out_path, "w+") as real_f, open(alt_out_path, "w+") as alt_f, \
-    profile(activities=[ProfilerActivity.CUDA], profile_memory=True) as prof:
-        with record_function("model_inference"):
-            for index, row in tqdm(genome_annotation.annotation.iterrows()):
+    with open(real_out_path, "w+") as real_f, open(alt_out_path, "w+") as alt_f:
+    #, \
+    #profile(activities=[ProfilerActivity.CUDA], profile_memory=False) as prof:
+    #    with record_function("model_inference"):
+        for index, row in tqdm(genome_annotation.annotation.iterrows()):
 
 
-                # middle_point = row['start'] + 256
-                # index the right embedding with dna[len(dna)//2]
-                dna = genome_annotation.get_dna_segment(index = index)
+            # middle_point = row['start'] + 256
+            # index the right embedding with dna[len(dna)//2]
+            dna = genome_annotation.get_dna_segment(index = index)
 
-                #dna = dna.replace('N', 'A')
-                #Ncount += dna.count('N')
+            #dna = dna.replace('N', 'A')
+            #Ncount += dna.count('N')
 
-                dna_alt = [x for x in dna]
-                if extra_context_left == extra_context_right:
-                    dna_alt[len(dna_alt)//2] = row['alt']
-                elif extra_context_right == 0:
-                    dna_alt[-1] = row['alt']
-                elif extra_context_left == 0:
-                    dna_alt[0] = row['alt']
-                else:
-                    raise ValueError('Not implemented')
-                dna_alt = ''.join(dna_alt)
+            dna_alt = [x for x in dna]
+            if extra_context_left == extra_context_right:
+                dna_alt[len(dna_alt)//2] = row['alt']
+            elif extra_context_right == 0:
+                dna_alt[-1] = row['alt']
+            elif extra_context_left == 0:
+                dna_alt[0] = row['alt']
+            else:
+                raise ValueError('Not implemented')
+            dna_alt = ''.join(dna_alt)
 
-                embedding_wt, embedding_alt = embedder.embed([dna, dna_alt], **kwargs)
-                embedding_wt = embedding_wt[0, args.embedding_idx]
-                embedding_alt = embedding_alt[0, args.embedding_idx]
+            embedding_wt, embedding_alt = embedder.embed([dna, dna_alt], **kwargs)
+            embedding_wt = embedding_wt[0, args.embedding_idx]
+            embedding_alt = embedding_alt[0, args.embedding_idx]
 
-                np.savetxt(real_f, embedding_wt.reshape(1, -1), delimiter=",")
-                np.savetxt(alt_f, embedding_alt.reshape(1, -1), delimiter=",")
+            #np.savetxt(real_f, embedding_wt.reshape(1, -1), delimiter=",")
+            #np.savetxt(alt_f, embedding_alt.reshape(1, -1), delimiter=",")
 
-                d = spatial.distance.cosine(embedding_alt, embedding_wt)
-                genome_annotation.annotation.loc[index, 'distance'] = d
-                
-                #count += 1
-                #if count == 1:
-                #    break
+            d = spatial.distance.cosine(embedding_alt, embedding_wt)
+            genome_annotation.annotation.loc[index, 'distance'] = d
 
 
     #this is useful for alphagenome
@@ -132,20 +128,19 @@ def main():
     elapsed = time.perf_counter() - start
     print(f"Total elapsed time: {elapsed}")
 
-    avg = prof.key_averages()
+    #avg = prof.key_averages()
 
-    total_self_device = sum(e.self_device_time_total for e in avg) / 1000  # ms
-    total_self_cpu  = sum(e.self_cpu_time_total for e in avg) / 1000   # ms
-    total_calls     = sum(e.count for e in avg)
-    total_self_device_mem = sum(e.self_device_memory_usage for e in avg)  # bytes
-    total_self_cpu_mem  = sum(e.self_cpu_memory_usage for e in avg)   # bytes
+    #total_self_device = sum(e.self_device_time_total for e in avg) / 1000  # ms
+    #total_self_cpu  = sum(e.self_cpu_time_total for e in avg) / 1000   # ms
+    #total_calls     = sum(e.count for e in avg)
+    #total_self_device_mem = sum(e.self_device_memory_usage for e in avg)  # bytes
+    #total_self_cpu_mem  = sum(e.self_cpu_memory_usage for e in avg)   # bytes
 
-    print(f"Total GPU compute time: {total_self_device:.1f} ms")
-    print(f"Total CPU time: {total_self_cpu:.1f} ms")
-    print(f"Total kernel/op calls: {total_calls}")
-    print(f"GPU compute per sample (÷{count}): {total_self_device/count:.2f} ms")
-    print(f"Total GPU memory allocated (self, all ops): {total_self_device_mem / 1e9:.3f} GB")
-    print(f"Total CPU memory allocated (self, all ops): {total_self_cpu_mem / 1e9:.3f} GB")
+    #print(f"Total GPU compute time: {total_self_device:.1f} ms")
+    #print(f"Total CPU time: {total_self_cpu:.1f} ms")
+    #print(f"Total kernel/op calls: {total_calls}")
+    #print(f"Total GPU memory allocated (self, all ops): {total_self_device_mem / 1e9:.3f} GB")
+    #print(f"Total CPU memory allocated (self, all ops): {total_self_cpu_mem / 1e9:.3f} GB")
 
 
 
