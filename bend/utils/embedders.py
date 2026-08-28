@@ -37,6 +37,7 @@ from transformers import logging, BertModel, BertConfig, BertTokenizer, AutoMode
 from sklearn.preprocessing import LabelEncoder
 from alphagenome_pytorch import AlphaGenome
 logging.set_verbosity_error()
+from peft import LoraConfig, get_peft_model
 
 
 
@@ -987,7 +988,49 @@ class DNABert2Embedder(BaseEmbedder):
 
         return embeddings
     
-    
+    def prepare_for_finetuning(self, r=8, lora_alpha=16, target_modules=None, lora_dropout=0.05):
+
+        """Wrap self.model with a LoRA adapter and put it in train mode."""
+        if target_modules is None:
+            # confirm these against self.model.named_modules() first
+            target_modules = ['Wqkv', 'attention.output.dense']
+
+        lora_config = LoraConfig(
+            r=r,
+            lora_alpha=lora_alpha,
+            target_modules=target_modules,
+            lora_dropout=lora_dropout,
+            bias="none",
+        )
+        self.model = get_peft_model(self.model, lora_config)
+        self.model.train()
+        self.model.print_trainable_parameters()
+
+    def embed_with_grads(self, sequences: List[str], pooling: str = "mean"):
+
+        encoded = self.tokenizer(
+            sequences,
+            return_tensors="pt",
+            padding=True,
+            return_attention_mask=True,
+            return_token_type_ids=False,
+        )
+
+        input_ids = encoded["input_ids"].to(device)
+        attention_mask = encoded["attention_mask"].to(device)
+
+        output = self.model(input_ids, attention_mask=attention_mask, output_hidden_states=True)
+        hidden = output["hidden_states"][-1]  # (batch, seq_len, hidden_dim)
+
+        if pooling == "mean":
+            mask = attention_mask.unsqueeze(-1).float()
+            pooled = (hidden * mask).sum(1) / mask.sum(1)
+        elif pooling == "cls":
+            pooled = hidden[:, 0]
+        else:
+            raise ValueError(f"Unknown pooling: {pooling}")
+
+        return pooled
 
     # GATTTATTAGGGGAGATTTTATATATCCCGA
     # ['[CLS]', 'G', 'ATTTATT', 'AGGGG', 'AGATT', 'TTATAT', 'ATCCCG', 'A', '[SEP]']

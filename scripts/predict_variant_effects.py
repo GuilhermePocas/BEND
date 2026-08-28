@@ -122,7 +122,7 @@ def main():
 
 
     #this is useful for alphagenome
-    genome_annotation.annotation.to_csv(f"cosine_similarities_{args.out_file}.csv")
+    genome_annotation.annotation.to_csv(f"cosine_distance_{args.out_file}.csv")
     print(f"total Ns: {Ncount}")
 
     elapsed = time.perf_counter() - start
