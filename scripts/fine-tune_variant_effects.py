@@ -10,6 +10,7 @@ from torch.profiler import profile, ProfilerActivity, record_function
 import numpy as np
 from torch.utils.data import Dataset, DataLoader
 import torch.nn.functional as F
+from sklearn.model_selection import train_test_split
 
 class VariantPairDataset(Dataset):
     def __init__(self, wt_sequences, alt_sequences, labels):
@@ -28,6 +29,8 @@ class VariantPairDataset(Dataset):
             "label": self.labels[idx],
         }
 
+def extract_embedding(embed_output, idx):
+    return torch.stack([torch.as_tensor(e[idx]) for e in embed_output])
 
 def contrastive_loss(emb_wt, emb_alt, labels, margin=1.0):
 
@@ -117,29 +120,49 @@ def main():
         alt_sequences.append(dna_alt)
         labels.append(row['label'])
 
-    dataset = VariantPairDataset(wt_sequences, alt_sequences, labels)
-    train_loader = DataLoader(
-        dataset, batch_size=args.batch_size, shuffle=True
+    #temp
+    wt_sequences = wt_sequences[:10000]
+    alt_sequences = alt_sequences[:10000]
+    labels = labels[:10000]
+
+    train_idx, val_idx = train_test_split(
+        range(len(labels)),
+        test_size=0.2,          # or expose as --val_split arg
+        random_state=42,
+        stratify=labels,        # keeps pathogenic/benign ratio balanced
     )
 
-    optimizer = torch.optim.AdamW(
-        [p for p in embedder.model.parameters() if p.requires_grad], lr=0.005
+    train_dataset = VariantPairDataset(
+        [wt_sequences[i] for i in train_idx],
+        [alt_sequences[i] for i in train_idx],
+        [labels[i] for i in train_idx],
     )
+    val_dataset = VariantPairDataset(
+        [wt_sequences[i] for i in val_idx],
+        [alt_sequences[i] for i in val_idx],
+        [labels[i] for i in val_idx],
+    )
+
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
 
     embedder.prepare_for_finetuning()
 
+    optimizer = torch.optim.AdamW(
+        [p for p in embedder.model.parameters() if p.requires_grad], lr=1e-4
+    )
+
+    best_val_loss = 10
+
     for epoch in range(args.epochs):
+        embedder.model.train()
         epoch_loss = 0.0
         for batch in tqdm(train_loader, desc=f"Epoch {epoch+1}/{args.epochs}"):
-            print("caca")
-            print(device)
             labels_batch = batch["label"].to(device)
 
-            emb_wt = embedder.embed_with_grads(batch["wt"]).to(device)
-            emb_alt = embedder.embed_with_grads(batch["alt"]).to(device)
+            emb_wt = embedder.training_embed(batch["wt"], args.embedding_idx, use_grads=True).to(device)
+            emb_alt = embedder.training_embed(batch["alt"], args.embedding_idx, use_grads=True).to(device)
 
-
-            
             loss = contrastive_loss(emb_wt, emb_alt, labels_batch)
 
             loss.backward()
@@ -147,7 +170,26 @@ def main():
             optimizer.zero_grad()
             epoch_loss += loss.item()
 
-        print(f"Epoch {epoch+1}: avg loss = {epoch_loss / len(train_loader):.4f}")
+        embedder.model.eval()
+        val_loss = 0.0
+        with torch.no_grad():
+            for batch in tqdm(val_loader, desc=f"Validation {epoch+1}/{args.epochs}"):
+                labels_batch = batch["label"].to(device)
+
+                emb_wt = embedder.training_embed(batch["wt"], args.embedding_idx, use_grads=False).to(device)
+                emb_alt = embedder.training_embed(batch["alt"], args.embedding_idx, use_grads=False).to(device)
+
+                loss = contrastive_loss(emb_wt, emb_alt, labels_batch)
+                val_loss += loss.item()
+
+        val_loss /= len(val_loader)
+        #print(f"Epoch {epoch+1}: val loss = {val_loss:.4f}")
+        print(f"Epoch {epoch+1}: train loss = {epoch_loss / len(train_loader):.4f}, val loss = {val_loss:.4f}")
+
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            embedder.model.save_pretrained("pretrained_models/DNABert2_lora")
+
 
     #embedder.save_finetuned(args.adapter_out)
     #print(f"Saved LoRA adapter to {args.adapter_out}")

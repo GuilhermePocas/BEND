@@ -37,7 +37,7 @@ from transformers import logging, BertModel, BertConfig, BertTokenizer, AutoMode
 from sklearn.preprocessing import LabelEncoder
 from alphagenome_pytorch import AlphaGenome
 logging.set_verbosity_error()
-from peft import LoraConfig, get_peft_model
+from peft import LoraConfig, get_peft_model, PeftModel
 
 
 
@@ -878,7 +878,7 @@ class DNABert2Embedder(BaseEmbedder):
     """
     Embed using the DNABERT2 model https://arxiv.org/pdf/2306.15006.pdf
     """
-    def load_model(self, model_name = "zhihan1996/DNABERT-2-117M", return_logits: bool = False, return_loss: bool = False, **kwargs):
+    def load_model(self, model_name = "zhihan1996/DNABERT-2-117M", return_logits: bool = False, return_loss: bool = False, lora: str = None, **kwargs):
         """
         Load the DNABERT2 model.
 
@@ -903,6 +903,11 @@ class DNABert2Embedder(BaseEmbedder):
         self.model.eval()
         self.model.to(device)
 
+        if lora is not None:
+            self.model = PeftModel.from_pretrained(self.model, lora)
+            self.model.to(device)
+            self.model.eval()  # for inference
+
         # https://github.com/Zhihan1996/DNABERT_2/issues/2
         self.max_length = 10000 #nucleotides.
 
@@ -910,7 +915,7 @@ class DNABert2Embedder(BaseEmbedder):
         self.return_loss = return_loss
 
 
-    def embed(self, sequences: List[str], disable_tqdm: bool = False, remove_special_tokens: bool = True, upsample_embeddings: bool = False):
+    def embed(self, sequences: List[str], disable_tqdm: bool = False, remove_special_tokens: bool = True, upsample_embeddings: bool = True):
         '''Embeds a list sequences using the DNABERT2 model.
         
         Parameters
@@ -1006,31 +1011,41 @@ class DNABert2Embedder(BaseEmbedder):
         self.model.train()
         self.model.print_trainable_parameters()
 
-    def embed_with_grads(self, sequences: List[str], pooling: str = "mean"):
+    def training_embed(self, sequences: List[str], position_idx=0, upsample_embeddings=True, remove_special_tokens=True, use_grads=True):
 
-        encoded = self.tokenizer(
-            sequences,
-            return_tensors="pt",
-            padding=True,
-            return_attention_mask=True,
-            return_token_type_ids=False,
-        )
+        context = torch.enable_grad() if use_grads else torch.no_grad()
 
-        input_ids = encoded["input_ids"].to(device)
-        attention_mask = encoded["attention_mask"].to(device)
+        with context:
+            encoded = self.tokenizer(
+                sequences,
+                return_tensors="pt",
+                padding=True,
+                return_attention_mask=True,
+                return_token_type_ids=False,
+            )
 
-        output = self.model(input_ids, attention_mask=attention_mask, output_hidden_states=True)
-        hidden = output["hidden_states"][-1]  # (batch, seq_len, hidden_dim)
+            input_ids = encoded["input_ids"].to(device)
+            attention_mask = encoded["attention_mask"].to(device)
 
-        if pooling == "mean":
-            mask = attention_mask.unsqueeze(-1).float()
-            pooled = (hidden * mask).sum(1) / mask.sum(1)
-        elif pooling == "cls":
-            pooled = hidden[:, 0]
-        else:
-            raise ValueError(f"Unknown pooling: {pooling}")
+            output = self.model(input_ids, attention_mask=attention_mask, output_hidden_states=True)
+            hidden = output["hidden_states"]  # (batch, seq_len, hidden_dim)
 
-        return pooled
+            pooled = []
+            for i in range(input_ids.shape[0]):
+                seq_len = attention_mask[i].sum().item()  # drop padding for this sequence
+                seq_ids = input_ids[i, :seq_len]
+                seq_hidden = hidden[i, :seq_len]  # (seq_len_tokens, dim) — still tracked by autograd
+
+                if upsample_embeddings:
+                    tokens = self.tokenizer.convert_ids_to_tokens(seq_ids)
+                    seq_hidden = self._repeat_embedding_vectors_tensor(tokens, seq_hidden)  # (seq_len_nt, dim)
+
+                if remove_special_tokens:
+                    seq_hidden = seq_hidden[1:-1]  # CLS/SEP occupy single positions even after upsampling, matching embed()'s order
+
+                pooled.append(seq_hidden[position_idx])
+
+            return torch.stack(pooled)
 
     # GATTTATTAGGGGAGATTTTATATATCCCGA
     # ['[CLS]', 'G', 'ATTTATT', 'AGGGG', 'AGATT', 'TTATAT', 'ATCCCG', 'A', '[SEP]']
@@ -1057,6 +1072,27 @@ class DNABert2Embedder(BaseEmbedder):
         # list of (1,1, 768) arrays
         new_embeddings = np.concatenate(new_embeddings, axis=0)
         return new_embeddings[None, :, :]
+
+    @staticmethod
+    def _repeat_embedding_vectors_tensor(tokens: Iterable[str], embeddings: torch.Tensor, has_special_tokens: bool = True):
+        '''
+        Tensor-native version of _repeat_embedding_vectors — preserves the autograd graph.
+        embeddings: (num_tokens, dim), no batch dim.
+        '''
+        assert len(tokens) == embeddings.shape[0], 'Number of tokens and embeddings must match.'
+        new_embeddings = []
+        for idx, token in enumerate(tokens):
+            slice_i = embeddings[idx:idx + 1, :]  # (1, dim)
+
+            if has_special_tokens and (idx == 0 or idx == len(tokens) - 1):
+                new_embeddings.append(slice_i)
+                continue
+            if token == "[UNK]":
+                new_embeddings.append(slice_i)
+            else:
+                new_embeddings.append(slice_i.expand(len(token), -1))  # view-based repeat, autograd-safe
+
+        return torch.cat(new_embeddings, dim=0)  # (seq_len_nucleotides, dim)
 
 
 class GROVEREmbedder(BaseEmbedder):

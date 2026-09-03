@@ -15,6 +15,7 @@ from torch.profiler import profile, ProfilerActivity, record_function
 import numpy as np
 
 
+
 def main():
 
     parser = argparse.ArgumentParser('Compute embeddings')
@@ -60,7 +61,7 @@ def main():
         extra_context_left = args.extra_context
         extra_context_right = 0
     elif args.model == 'dnabert2':
-        embedder = embedders.DNABert2Embedder(args.checkpoint)
+        embedder = embedders.DNABert2Embedder(args.checkpoint, lora = "pretrained_models/DNABert2_lora")
         kwargs['upsample_embeddings'] = True # each nucleotide has an embedding
     elif args.model == 'grover':
         embedder = embedders.GROVEREmbedder(args.checkpoint)
@@ -72,6 +73,7 @@ def main():
     # load the bed file
     genome_annotation = Annotation(args.bed_file, reference_genome=args.genome)
 
+    genome_annotation.annotation = genome_annotation.annotation.iloc[20000:30000].reset_index(drop=True)
 
     # extend the segments if necessary
     if args.extra_context > 0:
