@@ -993,7 +993,7 @@ class DNABert2Embedder(BaseEmbedder):
 
         return embeddings
     
-    def prepare_for_finetuning(self, r=8, lora_alpha=16, target_modules=None, lora_dropout=0.05):
+    def prepare_for_finetuning(self, r=8, lora_alpha=16, target_modules=None, lora_dropout=0.1):
 
         """Wrap self.model with a LoRA adapter and put it in train mode."""
         if target_modules is None:

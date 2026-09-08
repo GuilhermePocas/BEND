@@ -32,7 +32,7 @@ class VariantPairDataset(Dataset):
 def extract_embedding(embed_output, idx):
     return torch.stack([torch.as_tensor(e[idx]) for e in embed_output])
 
-def contrastive_loss(emb_wt, emb_alt, labels, margin=1.0):
+def contrastive_loss(emb_wt, emb_alt, labels, margin=10.0):
 
     labels = labels.float()
     cos_sim = F.cosine_similarity(emb_wt, emb_alt, dim=-1)
@@ -149,7 +149,7 @@ def main():
     embedder.prepare_for_finetuning()
 
     optimizer = torch.optim.AdamW(
-        [p for p in embedder.model.parameters() if p.requires_grad], lr=1e-4
+        [p for p in embedder.model.parameters() if p.requires_grad], lr=1e-5
     )
 
     best_val_loss = 10
