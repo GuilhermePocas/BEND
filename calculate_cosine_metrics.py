@@ -3,7 +3,7 @@ from scipy import spatial
 from sklearn.metrics import roc_auc_score
 
 #separar por consequence
-df =  pd.read_csv('./cosine_distance_fine_tune_test.csv')
+df =  pd.read_csv('./cosine_distance_gene_test.csv')
 final_score = roc_auc_score(df['label'], df['distance'])
 
 

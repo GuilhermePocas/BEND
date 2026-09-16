@@ -35,14 +35,23 @@ result_df = result.df[["variant_idx", "gene_id", "gene_name"]]
 
 
 df_annotated = df.merge(result_df, on="variant_idx", how="left")
+def_annotated = df_annotated.drop(columns=["variant_idx"])
+df_annotated = df_annotated.dropna(subset=["gene_name"])
 
-df_annotated.drop(columns=["variant_idx"]).to_csv(
+
+df_annotated.to_csv(
     "./data/variant_effects/variant_effects_expression_annotated.bed",
     sep="\t",
     index=False
 )
 
+gene_counts = df_annotated["gene_name"].value_counts()
+top15 = gene_counts.head(15)
 
 print(df_annotated.head(20))
 print(f"\n{len(df)} variants -> {len(df_annotated)} rows after annotation")
 print(f"{df_annotated['gene_name'].isna().sum()} variants had no gene overlap (intergenic)")
+
+
+print("\nTop 15 genes by variant count:")
+print(top15)

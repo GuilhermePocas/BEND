@@ -61,7 +61,7 @@ def main():
         extra_context_left = args.extra_context
         extra_context_right = 0
     elif args.model == 'dnabert2':
-        embedder = embedders.DNABert2Embedder(args.checkpoint, lora = "pretrained_models/DNABert2_lora")
+        embedder = embedders.DNABert2Embedder(args.checkpoint)#, lora = "pretrained_models/DNABert2_lora")
         kwargs['upsample_embeddings'] = True # each nucleotide has an embedding
     elif args.model == 'grover':
         embedder = embedders.GROVEREmbedder(args.checkpoint)
