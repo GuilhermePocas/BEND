@@ -13,6 +13,10 @@ import torch
 import torchvision.models as models
 from torch.profiler import profile, ProfilerActivity, record_function
 import numpy as np
+import pickle
+from pathlib import Path
+from sklearn.metrics import roc_auc_score
+from datetime import datetime
 
 
 
@@ -25,9 +29,9 @@ def main():
     parser.add_argument('model', choices=['ag', 'nt', 'dnabert', 'awdlstm', 'gpn', 'convnet', 'genalm', 'hyenadna', 'dnabert2','grover'], type=str, help='Model architecture for computing embeddings')
     parser.add_argument('checkpoint', type=str, help='Path to or name of the model checkpoint')
     parser.add_argument('genome', type=str, help='Path to the reference genome fasta file')
-    parser.add_argument('--extra_context', type=int, default=128, help='Number of extra nucleotides to include on each side of the sequence')
-    parser.add_argument('--kmer', type=int, default=3, help = 'Kmer size for the DNABERT model')
-    parser.add_argument('--embedding_idx', type=int, default=-1, help = 'Index of the embedding to use for computing the distance')
+    parser.add_argument('--extra_context', type=int, default=1024, help='Number of extra nucleotides to include on each side of the sequence')
+    parser.add_argument('--kmer', type=int, default=6, help = 'Kmer size for the DNABERT model')
+    parser.add_argument('--embedding_idx', type=int, default=1024, help = 'Index of the embedding to use for computing the distance')
 
     args = parser.parse_args()
 
@@ -73,7 +77,7 @@ def main():
     # load the bed file
     genome_annotation = Annotation(args.bed_file, reference_genome=args.genome)
 
-    genome_annotation.annotation = genome_annotation.annotation.iloc[20000:30000].reset_index(drop=True)
+    #genome_annotation.annotation = genome_annotation.annotation.iloc[20000:30000].reset_index(drop=True)
 
     # extend the segments if necessary
     if args.extra_context > 0:
@@ -81,16 +85,16 @@ def main():
 
     genome_annotation.annotation['distance'] = None
 
+    run_dir = Path(f"runs/{args.model}/{args.out_file}")
+    run_dir.mkdir(parents=True, exist_ok=True)
+    out_path = run_dir / f"embeddings_{args.out_file}.pkl"
+
+
     Ncount = 0
     start = time.perf_counter()
 
-    real_out_path = f"real_embeddings_{args.out_file}.csv"
-    alt_out_path = f"alt_embeddings_{args.out_file}.csv"
 
-    with open(real_out_path, "w+") as real_f, open(alt_out_path, "w+") as alt_f:
-    #, \
-    #profile(activities=[ProfilerActivity.CUDA], profile_memory=False) as prof:
-    #    with record_function("model_inference"):
+    with open(out_path, "wb") as f:
         for index, row in tqdm(genome_annotation.annotation.iterrows()):
 
 
@@ -98,8 +102,8 @@ def main():
             # index the right embedding with dna[len(dna)//2]
             dna = genome_annotation.get_dna_segment(index = index)
 
-            #dna = dna.replace('N', 'A')
-            #Ncount += dna.count('N')
+            dna = dna.replace('N', 'A')
+            Ncount += dna.count('N')
 
             dna_alt = [x for x in dna]
             if extra_context_left == extra_context_right:
@@ -116,34 +120,29 @@ def main():
             embedding_wt = embedding_wt[0, args.embedding_idx]
             embedding_alt = embedding_alt[0, args.embedding_idx]
 
-            #np.savetxt(real_f, embedding_wt.reshape(1, -1), delimiter=",")
-            #np.savetxt(alt_f, embedding_alt.reshape(1, -1), delimiter=",")
+            pickle.dump((index, np.asarray(embedding_wt), np.asarray(embedding_alt)), f,
+                    protocol=pickle.HIGHEST_PROTOCOL)
 
             d = spatial.distance.cosine(embedding_alt, embedding_wt)
             genome_annotation.annotation.loc[index, 'distance'] = d
 
-
-    #this is useful for alphagenome
-    genome_annotation.annotation.to_csv(f"cosine_distance_{args.out_file}.csv")
-    print(f"total Ns: {Ncount}")
-
     elapsed = time.perf_counter() - start
     print(f"Total elapsed time: {elapsed}")
 
-    #avg = prof.key_averages()
+    #this is useful for alphagenome
+    genome_annotation.annotation.to_csv(run_dir / f"cosine_distance_{args.out_file}.csv")
 
-    #total_self_device = sum(e.self_device_time_total for e in avg) / 1000  # ms
-    #total_self_cpu  = sum(e.self_cpu_time_total for e in avg) / 1000   # ms
-    #total_calls     = sum(e.count for e in avg)
-    #total_self_device_mem = sum(e.self_device_memory_usage for e in avg)  # bytes
-    #total_self_cpu_mem  = sum(e.self_cpu_memory_usage for e in avg)   # bytes
+    final_score = roc_auc_score(genome_annotation.annotation['label'], genome_annotation.annotation['distance'])
+    print(f"Final Score: {final_score}")
 
-    #print(f"Total GPU compute time: {total_self_device:.1f} ms")
-    #print(f"Total CPU time: {total_self_cpu:.1f} ms")
-    #print(f"Total kernel/op calls: {total_calls}")
-    #print(f"Total GPU memory allocated (self, all ops): {total_self_device_mem / 1e9:.3f} GB")
-    #print(f"Total CPU memory allocated (self, all ops): {total_self_cpu_mem / 1e9:.3f} GB")
-
+    with open(run_dir / "log.txt", "a") as log_f:
+        log_f.write(
+            f"{datetime.now():%Y-%m-%d %H:%M:%S} | "
+            f"out_file={args.out_file} | "
+            f"elapsed={elapsed:.2f}s | "
+            f"n_variants={len(genome_annotation.annotation)} |"
+            f"AUC={final_score}\n"
+        )
 
 
 if __name__ == '__main__':
