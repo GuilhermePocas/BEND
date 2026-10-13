@@ -11,6 +11,8 @@ import numpy as np
 from torch.utils.data import Dataset, DataLoader
 import torch.nn.functional as F
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import roc_auc_score
+
 
 class VariantPairDataset(Dataset):
     def __init__(self, wt_sequences, alt_sequences, labels):
@@ -120,16 +122,24 @@ def main():
         alt_sequences.append(dna_alt)
         labels.append(row['label'])
 
-    #temp
-    wt_sequences = wt_sequences[:10000]
-    alt_sequences = alt_sequences[:10000]
-    labels = labels[:10000]
+    wt_sequences = wt_sequences[:100]
+    alt_sequences = alt_sequences[:100]
+    labels = labels[:100]
+
+    trainval_idx, test_idx = train_test_split(
+            range(len(labels)),
+            test_size=0.2,          # or expose as --val_split arg
+            random_state=42,
+            stratify=labels,        # keeps pathogenic/benign ratio balanced
+    )
+
+    trainval_labels = [labels[i] for i in trainval_idx]
 
     train_idx, val_idx = train_test_split(
-        range(len(labels)),
+        trainval_idx,
         test_size=0.2,          # or expose as --val_split arg
         random_state=42,
-        stratify=labels,        # keeps pathogenic/benign ratio balanced
+        stratify=trainval_labels,        # keeps pathogenic/benign ratio balanced
     )
 
     train_dataset = VariantPairDataset(
@@ -188,12 +198,32 @@ def main():
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            embedder.model.save_pretrained("pretrained_models/DNABert2_lora")
+            #embedder.model.save_pretrained("pretrained_models/DNABert2_lora")
 
 
-    #embedder.save_finetuned(args.adapter_out)
-    #print(f"Saved LoRA adapter to {args.adapter_out}")
-    #print(f"Total elapsed time: {time.perf_counter() - start:.1f}s")
+    #Test
+
+    test_wt_seqs = [wt_sequences[i] for i in test_idx]
+    test_alt_seqs = [alt_sequences[i] for i in test_idx]
+    test_labels = [labels[i] for i in test_idx]
+    test_seqs = zip(test_wt_seqs, test_alt_seqs, test_labels)
+
+    test_distance = []
+
+    for wt, alt, label in tqdm(test_seqs, total=len(test_labels), desc="Testing"):
+
+        embedding_wt, embedding_alt = embedder.embed([wt, alt], **kwargs)
+        embedding_wt = embedding_wt[0, args.embedding_idx]
+        embedding_alt = embedding_alt[0, args.embedding_idx]
+
+        d = spatial.distance.cosine(embedding_alt, embedding_wt)
+        test_distance.append(d)
+
+    final_score = roc_auc_score(test_labels, test_distance)
+    print(f"Final Score: {final_score}")
+
+
+
 
 
 if __name__ == '__main__':

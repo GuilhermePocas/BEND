@@ -3,7 +3,7 @@ from scipy import spatial
 from sklearn.metrics import roc_auc_score
 
 #separar por consequence
-df =  pd.read_csv('./cosine_distance_grover.csv')
+df =  pd.read_csv('runs/dnabert/dnabert_no_pval/cosine_distance_dnabert_no_pval.csv')
 final_score = roc_auc_score(df['label'], df['distance'])
 
 

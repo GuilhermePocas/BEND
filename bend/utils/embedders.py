@@ -341,7 +341,7 @@ class NucleotideTransformerEmbedder(BaseEmbedder):
             raise ValueError('Only one of return_logits and return_loss can be True.')
 
         # Get pretrained model
-        if 'v2' in model_name:
+        if 'v2' or 'v3' in model_name:
             self.model = AutoModelForMaskedLM.from_pretrained(model_name, trust_remote_code=True)
             self.tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
             self.max_seq_len = 12282 # "model_max_length": 2048, --> 12,288
