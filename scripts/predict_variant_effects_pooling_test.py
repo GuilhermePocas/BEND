@@ -80,8 +80,7 @@ def main():
     genome_annotation = Annotation(args.bed_file, reference_genome=args.genome)
 
     if args.genome == 'data/genomes/GRCh37.no-chr.fa':
-        ann = genome_annotation.annotation
-        genome_annotation.annotation['chromosome'] = ann['chromosome'].astype(str).str.replace(r'^chr', '', regex=True)
+        genome_annotation.annotation['chromosome'] = genome_annotation.annotation['chromosome'].astype(str).str.replace(r'^chr', '', regex=True)
 
     #genome_annotation.annotation = genome_annotation.annotation.iloc[20000:30000].reset_index(drop=True)
 
@@ -90,7 +89,9 @@ def main():
         genome_annotation.extend_segments(extra_context_left=extra_context_left, extra_context_right=extra_context_right)
 
     for n in args.neighbours:
-        genome_annotation.annotation[f'distance_n{n}'] = np.nan
+        genome_annotation.annotation[f'distance_avg_n{n}'] = np.nan
+        genome_annotation.annotation[f'distance_ccs_n{n}'] = np.nan
+    genome_annotation.annotation['distance_cls'] = np.nan
 
     run_dir = Path(f"runs/{args.model}/{args.out_file}")
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -100,11 +101,11 @@ def main():
     start = time.perf_counter()
 
 
-
     with ExitStack() as stack:
         files = {r: stack.enter_context(open(p, "wb")) for r, p in out_paths.items()}
-        for index, row in tqdm(genome_annotation.annotation.iterrows()):
+        cls_file = stack.enter_context(open(run_dir / f"embeddings_{args.out_file}_cls.pkl", "wb"))
 
+        for index, row in tqdm(genome_annotation.annotation.iterrows()):
 
             # middle_point = row['start'] + 256
             # index the right embedding with dna[len(dna)//2]
@@ -124,16 +125,26 @@ def main():
                 raise ValueError('Not implemented')
             dna_alt = ''.join(dna_alt)
 
-            emb_wt, emb_alt = embedder.embed([dna, dna_alt], **kwargs)
+            emb_wt, emb_alt = embedder.embed([dna, dna_alt], remove_special_tokens=False, **kwargs)
             emb_wt, emb_alt = np.asarray(emb_wt[0]), np.asarray(emb_alt[0])  # [L, D]
+
+            cls_wt, cls_alt = emb_wt[0], emb_alt[0]          # [D] each
+            emb_wt, emb_alt = emb_wt[1:-1], emb_alt[1:-1]
+            pickle.dump((index, cls_wt, cls_alt), cls_file, protocol=pickle.HIGHEST_PROTOCOL)
+            genome_annotation.annotation.loc[index, 'distance_cls'] = spatial.distance.cosine(cls_alt, cls_wt)
+
             L = emb_wt.shape[0]
+
+            d_pos = 1 - (emb_wt * emb_alt).sum(1) / (np.linalg.norm(emb_wt, axis=1) * np.linalg.norm(emb_alt, axis=1))
 
             for n in args.neighbours:
                 lo, hi = max(0, args.embedding_idx - n), min(L, args.embedding_idx + n + 1)
                 wt_n, alt_n = emb_wt[lo:hi].mean(0), emb_alt[lo:hi].mean(0)
 
                 pickle.dump((index, wt_n, alt_n), files[n], protocol=pickle.HIGHEST_PROTOCOL)
-                genome_annotation.annotation.loc[index, f'distance_n{n}'] = spatial.distance.cosine(alt_n, wt_n)
+
+                genome_annotation.annotation.loc[index, f'distance_avg_n{n}'] = spatial.distance.cosine(alt_n, wt_n)
+                genome_annotation.annotation.loc[index, f'distance_ccs_n{n}'] = d_pos[lo:hi].sum()
 
 
     elapsed = time.perf_counter() - start
@@ -144,9 +155,12 @@ def main():
 
     scores = {}
     for n in args.neighbours:
-        scores[n] = roc_auc_score(genome_annotation.annotation['label'],
-                                genome_annotation.annotation[f'distance_n{n}'].astype(float))
-        print(f"AUC n={n}: {scores[n]}")
+        for kind in ('avg', 'ccs'):
+            scores[f'{kind}_n{n}'] = roc_auc_score(genome_annotation.annotation['label'], genome_annotation.annotation[f'distance_{kind}_n{n}'].astype(float))
+            print(f"AUC {kind}_n{n}: {scores[f'{kind}_n{n}']:.4f}")
+
+    scores['cls'] = roc_auc_score(genome_annotation.annotation['label'],
+                              genome_annotation.annotation['distance_cls'].astype(float))
 
     with open(run_dir / "log.txt", "a") as log_f:
         log_f.write(
