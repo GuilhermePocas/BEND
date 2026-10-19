@@ -21,6 +21,18 @@ def load_emb(path):
         obj = obj.cpu().numpy()
     return np.asarray(obj)
 
+def load_pairs(path):
+    idx, ref, alt = [], [], []
+    with open(path, "rb") as f:
+        while True:
+            try:
+                i, r, a = pickle.load(f)
+            except EOFError:
+                break
+            idx.append(i); ref.append(r); alt.append(a)
+    return np.array(idx), np.stack(ref), np.stack(alt)
+
+
 
 def make_model(d_in, n_out):
     out = 1 if n_out == 2 else n_out
@@ -67,16 +79,19 @@ np.random.seed(args.seed)
 device = "cuda" if torch.cuda.is_available() else "cpu"
  
 # ---- load data --
-ref = load_emb("../embeddings/ref_embeddings_disease_ag_2048.pkl")
-alt = load_emb("../embeddings/alt_embeddings_disease_ag_2048.pkl")
-label_df = pd.read_csv("../data/variant_effects/variant_effects_disease.bed", sep="\t")
+_, ref, alt = load_pairs("../../runs/alphagenome/expression_ag/embeddings_expression_ag.pkl")
+#ref = load_emb("../../embeddings/ref_embeddings_disease_hyena_large_512.pkl")
+#alt = load_emb("../../embeddings/alt_embeddings_disease_hyena_large_512.pkl")
+label_df = pd.read_csv("../../data/variant_effects/variant_effects_expression.bed", sep="\t")
 LABEL_COL = "label"  # adjust to the label column name in the .bed
 
 assert ref.shape == alt.shape and len(ref) == len(label_df), (
     f"ref={ref.shape} alt={alt.shape} labels={len(label_df)}"
 )
 
-X = ((alt + ref)/2).astype(np.float32)
+#X= (ref-alt).astype(np.float32)
+#X = ((alt + ref)/2).astype(np.float32)
+X = np.concatenate([ref, alt], axis=1).astype(np.float32)
 y_raw = label_df[LABEL_COL].values
 
 classes, y = np.unique(y_raw, return_inverse=True)

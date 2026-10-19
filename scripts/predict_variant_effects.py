@@ -77,6 +77,10 @@ def main():
     # load the bed file
     genome_annotation = Annotation(args.bed_file, reference_genome=args.genome)
 
+    if args.genome == 'data/genomes/GRCh37.no-chr.fa':
+        ann = genome_annotation.annotation
+        genome_annotation.annotation['chromosome'] = ann['chromosome'].astype(str).str.replace(r'^chr', '', regex=True)
+
     #genome_annotation.annotation = genome_annotation.annotation.iloc[20000:30000].reset_index(drop=True)
 
     # extend the segments if necessary

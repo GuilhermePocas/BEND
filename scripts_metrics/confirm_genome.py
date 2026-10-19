@@ -1,7 +1,7 @@
 import pandas as pd
 from Bio import SeqIO
 
-v = pd.read_csv("data/variant_effects/mpra/mpra_variant_effects_filtered.bed", sep="\t")
+v = pd.read_csv("data/variant_effects/mpra/mpra_variant_effects.bed", sep="\t")
 #v = pd.read_csv("data/variant_effects/variant_effects_disease.bed", sep="\t")
 v["start"] = v["start"].astype(int)
 v["chromosome"] = v["chromosome"].str.replace("chr", "", regex=False).astype(str)

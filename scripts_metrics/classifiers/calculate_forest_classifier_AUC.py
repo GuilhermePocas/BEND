@@ -17,6 +17,17 @@ def load_emb(path):
         # adjust the key if needed
         obj = obj["embeddings"] if "embeddings" in obj else np.stack(list(obj.values()))
     return np.asarray(obj)
+
+def load_pairs(path):
+    idx, ref, alt = [], [], []
+    with open(path, "rb") as f:
+        while True:
+            try:
+                i, r, a = pickle.load(f)
+            except EOFError:
+                break
+            idx.append(i); ref.append(r); alt.append(a)
+    return np.array(idx), np.stack(ref), np.stack(alt)
  
  
 def auc(y_true, probs):
@@ -34,9 +45,10 @@ p.add_argument("--seed", type=int, default=42)
 args = p.parse_args()
  
 # ---- load data --
-ref = load_emb("../embeddings/ref_embeddings_disease_ag_2048.pkl")
-alt = load_emb("../embeddings/alt_embeddings_disease_ag_2048.pkl")
-label_df = pd.read_csv("../data/variant_effects/variant_effects_disease.bed", sep="\t")
+_, ref, alt = load_pairs("../../runs/alphagenome/expression_ag/embeddings_expression_ag.pkl")
+#ref = load_emb("../../embeddings/ref_embeddings_disease_hyena_large_512.pkl")
+#alt = load_emb("../../embeddings/alt_embeddings_disease_hyena_large_512.pkl")
+label_df = pd.read_csv("../../data/variant_effects/variant_effects_expression.bed", sep="\t")
 LABEL_COL = "label"  # adjust to the label column name in the .bed
 
 assert ref.shape == alt.shape and len(ref) == len(label_df), (
@@ -44,7 +56,9 @@ assert ref.shape == alt.shape and len(ref) == len(label_df), (
 )
 print(f"ref={ref.shape} alt={alt.shape} labels={len(label_df)}")
 
+#X= (ref-alt).astype(np.float32)
 X = ((alt + ref)/2).astype(np.float32)
+#X = np.concatenate([ref, alt], axis=1).astype(np.float32)
 y_raw = label_df[LABEL_COL].values
 
 classes, y = np.unique(y_raw, return_inverse=True)
